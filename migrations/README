@@ -1,0 +1,6 @@
+Alembic migrations for a new standalone EchoCall installation.
+
+The initial revision creates the base tables before incremental upgrades.
+This portfolio chain is intended for an empty database, not as an instruction
+to replace or stamp an existing production database. Back up and compare the
+schema before any migration of an existing installation.

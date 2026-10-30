@@ -1,0 +1,152 @@
+limit_req_zone $binary_remote_addr zone=internal_api:10m rate=30r/s;
+
+upstream echocall_web {
+    server echocall-app-web:8000;
+    keepalive 16;
+}
+
+upstream echocall_internal_api {
+    server internal-api:8001;
+    keepalive 16;
+}
+
+server {
+    listen 80;
+    server_name ${APP_DOMAIN} ${INTERNAL_API_DOMAIN} ${MEET_DOMAIN};
+    location /.well-known/acme-challenge/ { root /var/www/acme; }
+    location / { return 301 https://$host$request_uri; }
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${APP_DOMAIN};
+
+    ssl_certificate /etc/nginx/certs/app/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/app/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    location = /health/nginx {
+        access_log off;
+        default_type application/json;
+        return 200 '{"ok":true}';
+    }
+
+    location /static/ {
+        alias /app/web/static/;
+        access_log off;
+        expires 30d;
+        add_header Cache-Control "public, max-age=2592000, immutable";
+    }
+
+    location / {
+        proxy_pass http://echocall_web;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 30s;
+        proxy_read_timeout 120s;
+    }
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${INTERNAL_API_DOMAIN};
+
+    ssl_certificate /etc/nginx/certs/api/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/api/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    location = /health/live {
+        # A local SSH forward reaches the container through the RF app-network
+        # gateway. Keep internal API access narrower than the public call UI.
+        allow 127.0.0.1;
+        allow ${TUNNEL_GATEWAY_IP};
+        allow ${FOREIGN_SERVER_IP};
+        deny all;
+        proxy_pass http://echocall_internal_api;
+        access_log off;
+    }
+
+    location /internal/v1/ {
+        allow 127.0.0.1;
+        allow ${TUNNEL_GATEWAY_IP};
+        allow ${FOREIGN_SERVER_IP};
+        deny all;
+        limit_req zone=internal_api burst=60 nodelay;
+        client_max_body_size 64k;
+        proxy_pass http://echocall_internal_api;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Request-ID $http_x_request_id;
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 15s;
+        proxy_read_timeout 15s;
+    }
+
+    # Capability links use this clean origin so a legacy root-scoped Jitsi
+    # service worker left on APP_DOMAIN cannot intercept the first navigation.
+    location /static/ {
+        alias /app/web/static/;
+        access_log off;
+        expires 30d;
+        add_header Cache-Control "public, max-age=2592000, immutable";
+    }
+
+    location / {
+        proxy_pass http://echocall_web;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 30s;
+        proxy_read_timeout 120s;
+    }
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${MEET_DOMAIN};
+
+    ssl_certificate /etc/nginx/certs/meet/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/meet/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    location = /health/nginx {
+        access_log off;
+        default_type application/json;
+        return 200 '{"ok":true}';
+    }
+
+    location / {
+        # `jitsi-web` is an alias on the external RF app network. Using a
+        # variable makes nginx resolve it per request, so app ingress can stay
+        # healthy while the separately managed media project is restarted.
+        resolver 127.0.0.11 valid=10s ipv6=off;
+        set $jitsi_web_upstream http://jitsi-web:${JITSI_HTTP_PORT};
+        proxy_pass $jitsi_web_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 3600s;
+        proxy_buffering off;
+    }
+}

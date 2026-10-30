@@ -1,0 +1,152 @@
+name: echocall-rf
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [data]
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [data]
+
+  migrate:
+    image: ${APP_IMAGE:-echocall-rf-app:latest}
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DATA_ACCESS_MODE: direct
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [data]
+
+  web:
+    image: ${APP_IMAGE:-echocall-rf-app:latest}
+    build: .
+    command: ["gunicorn", "web.app:app", "--bind", "0.0.0.0:8000", "--workers", "2", "--threads", "4", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-"]
+    restart: unless-stopped
+    extra_hosts:
+      # Restricted reverse-SSH listener on this network's fixed host gateway.
+      - "gateway.example.com:${TUNNEL_GATEWAY_IP:-172.29.0.1}"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DATA_ACCESS_MODE: direct
+      DOMAIN: ${DOMAIN:?DOMAIN is required}
+      JITSI_DOMAIN: ${JITSI_DOMAIN:?JITSI_DOMAIN is required}
+      BOT_USERNAME: ${BOT_USERNAME:?BOT_USERNAME is required}
+      TELEGRAM_GATEWAY_URL: ${TELEGRAM_GATEWAY_URL:?TELEGRAM_GATEWAY_URL is required}
+      TELEGRAM_GATEWAY_TOKEN: ${TELEGRAM_GATEWAY_TOKEN:?TELEGRAM_GATEWAY_TOKEN is required}
+      TELEGRAM_GATEWAY_TIMEOUT: ${TELEGRAM_GATEWAY_TIMEOUT:-8}
+      DEBUG: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    expose: ["8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks:
+      app:
+        aliases:
+          # `web` is also the Jitsi Compose service name on this shared
+          # network. Use a project-unique alias for deterministic nginx DNS.
+          - echocall-app-web
+      data: {}
+
+  internal-api:
+    image: ${APP_IMAGE:-echocall-rf-app:latest}
+    build: .
+    command: ["gunicorn", "shared.internal_api.server:app", "--bind", "0.0.0.0:8001", "--workers", "2", "--threads", "4", "--timeout", "30", "--access-logfile", "-", "--error-logfile", "-"]
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DATA_ACCESS_MODE: direct
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN is required}
+      JITSI_DOMAIN: ${JITSI_DOMAIN:?JITSI_DOMAIN is required}
+      TURN_HEALTH_HOST: ${TURN_HEALTH_HOST:-turn.example.com}
+      TURN_HEALTH_PORT: ${TURN_HEALTH_PORT:-3478}
+      RF_WEB_HEALTH_URL: http://echocall-app-web:8000/health/ready
+      BACKUP_TRIGGER_SOCKET: /run/echocall-backup-trigger/trigger.sock
+      BACKUP_TRIGGER_TIMEOUT: ${BACKUP_TRIGGER_TIMEOUT:-3}
+    volumes:
+      - ${BACKUP_TRIGGER_DIR:-/run/echocall-backup-trigger}:/run/echocall-backup-trigger:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    expose: ["8001"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/ready', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks: [app, data]
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?APP_DOMAIN is required}
+      INTERNAL_API_DOMAIN: ${INTERNAL_API_DOMAIN:?INTERNAL_API_DOMAIN is required}
+      MEET_DOMAIN: ${MEET_DOMAIN:-meet.example.com}
+      JITSI_HTTP_PORT: ${JITSI_HTTP_PORT:-8000}
+      FOREIGN_SERVER_IP: ${FOREIGN_SERVER_IP:?FOREIGN_SERVER_IP is required}
+      TUNNEL_GATEWAY_IP: ${TUNNEL_GATEWAY_IP:-172.29.0.1}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/rf.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./web/static:/app/web/static:ro
+      - ${TLS_CERT_DIR:?TLS_CERT_DIR is required}:/etc/nginx/certs:ro
+      - ${ACME_WEBROOT_DIR:-/var/www/echocall-acme}:/var/www/acme:ro
+    depends_on:
+      web:
+        condition: service_healthy
+      internal-api:
+        condition: service_healthy
+    networks: [app]
+
+networks:
+  app:
+    ipam:
+      config:
+        - subnet: ${APP_NETWORK_SUBNET:-172.29.0.0/24}
+          gateway: ${TUNNEL_GATEWAY_IP:-172.29.0.1}
+  data:
+    internal: true
+
+volumes:
+  postgres_data:
+  redis_data:

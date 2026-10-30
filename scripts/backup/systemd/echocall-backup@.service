@@ -1,0 +1,15 @@
+[Unit]
+Description=EchoCall PostgreSQL backup to %i
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/echocall-backup/backup.env
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+ExecStart=/usr/local/sbin/echocall-backup %i
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=2h

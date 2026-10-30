@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly EchoCall PostgreSQL backup to Google Drive
+
+[Timer]
+OnCalendar=Sun *-*-* 04:15:00
+RandomizedDelaySec=20m
+Persistent=true
+Unit=echocall-backup@google.service
+
+[Install]
+WantedBy=timers.target

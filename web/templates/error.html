@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+{% block body_class %}error-page{% endblock %}
+
+{% block content %}
+<div class="error-card">
+    <div class="error-icon">
+        {{ icon or '🔗' }}
+    </div>
+
+    {% if code %}
+        <div class="error-code">
+            ERROR {{ code }}
+        </div>
+    {% endif %}
+
+    <h1 class="error-title">{{ title }}</h1>
+    <p class="error-message">{{ message }}</p>
+
+    {% if button_url %}
+        <a href="{{ button_url }}" class="button">
+            {{ button_text or 'Вернуться' }}
+        </a>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,82 @@
+/* EchoCall owns all interactive call chrome outside the cross-origin iframe. */
+.subject-info-container,
+.subject,
+.header-container,
+.header-watermark-container,
+.leftwatermark,
+.rightwatermark,
+.watermark,
+.welcome-watermark,
+.new-toolbox,
+.always-on-top-toolbox,
+.toolbox-content,
+.toolbox-content-wrapper,
+.toolbox-content-mobile {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+/* EchoCall renders the remote participant as the large video. The native
+ * desktop/mobile filmstrip would duplicate that participant beside it, so its
+ * layout shell remains transparent and non-interactive. */
+.echocall-embedded-call .filmstrip {
+    background: transparent !important;
+    pointer-events: none !important;
+}
+
+.echocall-embedded-call #remoteVideos,
+.echocall-embedded-call #filmstripLocalScreenShare {
+    display: none !important;
+    visibility: hidden !important;
+}
+
+/* The hidden desktop filmstrip must not reserve space beside the large video. */
+.echocall-embedded-call #largeVideoContainer,
+.echocall-embedded-call #videospace {
+    width: 100% !important;
+    height: 100% !important;
+    right: 0 !important;
+}
+
+/* Render a dedicated local preview above Jitsi and outside EchoCall's top and
+ * bottom chrome masks. JavaScript supplies the stream and clamped transform. */
+.echocall-embedded-call #echocall-self-view {
+    position: fixed !important;
+    top: 0 !important;
+    right: auto !important;
+    bottom: auto !important;
+    left: 0 !important;
+    z-index: 260 !important;
+    display: none !important;
+    width: clamp(96px, 27vw, 132px) !important;
+    height: clamp(120px, 34vw, 165px) !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 2px solid rgba(255, 255, 255, 0.88) !important;
+    border-radius: 14px !important;
+    overflow: hidden !important;
+    background: #111827 !important;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.42) !important;
+    touch-action: none !important;
+    cursor: grab !important;
+    user-select: none !important;
+    will-change: transform !important;
+}
+
+.echocall-embedded-call #echocall-self-view.echocall-self-view-video-active {
+    display: block !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
+}
+
+.echocall-embedded-call #echocall-self-view.echocall-self-view-dragging {
+    cursor: grabbing !important;
+}
+
+.echocall-embedded-call #echocall-self-view video {
+    width: 100% !important;
+    height: 100% !important;
+    margin: 0 !important;
+    object-fit: cover !important;
+}

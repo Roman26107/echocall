@@ -1,0 +1,11 @@
+[Unit]
+Description=Monthly restore verification of Google Drive EchoCall backup
+
+[Timer]
+OnCalendar=monthly
+RandomizedDelaySec=3h
+Persistent=true
+Unit=echocall-restore-test@google.service
+
+[Install]
+WantedBy=timers.target

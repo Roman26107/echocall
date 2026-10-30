@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block title %}Звонок{% endblock %}
+{% block body_class %}call-page{% endblock %}
+
+{% block content %}
+<section id="loading-screen" class="screen state-screen active">
+    <div class="state-card">
+        <div class="icon-circle">
+            <div class="icon">☎</div>
+        </div>
+        <h1>Подключаем к звонку...</h1>
+        <p>Пожалуйста, подождите несколько секунд.</p>
+        <div class="loader"></div>
+    </div>
+</section>
+
+<section id="jitsi-screen" class="screen">
+    <div id="jitsi-container"></div>
+    <div class="jitsi-native-chrome-mask jitsi-native-chrome-mask-top" aria-hidden="true"></div>
+    <div class="jitsi-native-chrome-mask jitsi-native-chrome-mask-bottom" aria-hidden="true"></div>
+    <div id="call-controls" class="call-controls" role="toolbar" aria-label="Управление звонком">
+        <button id="toggle-audio" class="call-control" type="button" aria-label="Выключить микрофон" aria-pressed="false">
+            <span class="call-control-icon" aria-hidden="true">🎙</span>
+            <span class="call-control-label">Микрофон</span>
+        </button>
+        <button id="toggle-video" class="call-control is-off" type="button" aria-label="Включить камеру" aria-pressed="true">
+            <span class="call-control-icon" aria-hidden="true">📷</span>
+            <span class="call-control-label">Камера</span>
+        </button>
+        <button id="switch-camera" class="call-control call-control-switch-camera" type="button" aria-label="Переключить камеру" hidden disabled>
+            <span class="call-control-icon" aria-hidden="true">🔄</span>
+            <span class="call-control-label">Переключить камеру</span>
+        </button>
+        <button id="end-call" class="call-control call-control-end" type="button" aria-label="Завершить звонок">
+            <span class="call-control-icon" aria-hidden="true">☎</span>
+            <span class="call-control-label">Завершить</span>
+        </button>
+    </div>
+</section>
+
+<section id="finished-screen" class="screen state-screen">
+    <div class="state-card">
+        <div class="icon-circle light">
+            <div class="icon">📞</div>
+        </div>
+        <h1>Звонок завершён</h1>
+        <p>Можно закрыть эту вкладку и вернуться в Telegram.</p>
+    </div>
+</section>
+
+<section id="other-tab-screen" class="screen state-screen">
+    <div class="state-card">
+        <div class="icon-circle light">
+            <div class="icon">📱</div>
+        </div>
+        <h1>Звонок открыт в другой вкладке</h1>
+        <p>Чтобы камера и микрофон не конфликтовали, здесь звонок приостановлен.</p>
+        <button id="activate-here" class="btn" type="button">Продолжить здесь</button>
+    </div>
+</section>
+
+<section id="connection-error-screen" class="screen state-screen">
+    <div class="state-card">
+        <div class="icon-circle light">
+            <div class="icon">📞</div>
+        </div>
+        <h1>Не удалось подключиться</h1>
+        <p>Проверьте интернет-соединение и попробуйте снова.</p>
+        <button id="retry-connection" class="btn" type="button">Попробовать снова</button>
+    </div>
+</section>
+
+<section id="permission-error-screen" class="screen state-screen">
+    <div class="state-card">
+        <div class="icon-circle light">
+            <div class="icon">🔒</div>
+        </div>
+        <h1>Нет доступа к микрофону или камере</h1>
+        <p>Разрешите доступ в настройках браузера и обновите страницу.</p>
+        <button id="retry-permissions" class="btn" type="button">Обновить страницу</button>
+    </div>
+</section>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="https://{{ jitsi_domain }}/external_api.js"></script>
+<script>
+    window.CALL_CONFIG = {
+        jitsiDomain: {{ jitsi_domain|tojson }},
+        callId: {{ call_id|tojson }},
+        displayName: {{ display_name|tojson }},
+        hangupUrl: {{ url_for('call_hangup', access_token=access_token)|tojson }},
+        statusUrl: {{ url_for('call_status', access_token=access_token)|tojson }},
+        transportUrl: {{ url_for('call_transport', access_token=access_token)|tojson }}
+    };
+</script>
+<script src="{{ url_for('static', filename='js/call-tab-coordinator.js', v='20260803-1') }}"></script>
+<script src="{{ url_for('static', filename='js/call.js', v='20260813-2') }}"></script>
+{% endblock %}

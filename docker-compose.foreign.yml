@@ -1,0 +1,57 @@
+name: echocall-foreign
+
+services:
+  bot:
+    image: ${APP_IMAGE:-echocall-foreign-app:latest}
+    build: .
+    command: ["python", "-m", "bot.app"]
+    restart: unless-stopped
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN:?BOT_TOKEN is required}
+      BOT_USERNAME: ${BOT_USERNAME:?BOT_USERNAME is required}
+      ADMIN: ${ADMIN:-0}
+      DOMAIN: ${DOMAIN:?DOMAIN is required}
+      DATA_ACCESS_MODE: remote
+      INTERNAL_API_URL: ${INTERNAL_API_URL:?INTERNAL_API_URL is required}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN is required}
+      INTERNAL_API_TIMEOUT: ${INTERNAL_API_TIMEOUT:-8}
+      INTERNAL_API_VERIFY_TLS: "true"
+      SYSTEM_METRICS_INTERVAL_SECONDS: ${SYSTEM_METRICS_INTERVAL_SECONDS:-300}
+      FOREIGN_GATEWAY_HEALTH_URL: http://telegram-gateway:8010/health/live
+    depends_on:
+      telegram-gateway:
+        condition: service_healthy
+    extra_hosts:
+      # Use the RF public IP for direct HTTPS, or the fixed gateway for the
+      # restricted SSH fallback. TLS SNI/certificate validation stays intact.
+      - "${INTERNAL_API_DOMAIN:-api.example.com}:${INTERNAL_API_CONNECT_IP:?INTERNAL_API_CONNECT_IP is required}"
+    networks:
+      - app
+
+  telegram-gateway:
+    image: ${APP_IMAGE:-echocall-foreign-app:latest}
+    build: .
+    command: ["gunicorn", "gateway.app:app", "--bind", "0.0.0.0:8010", "--workers", "2", "--threads", "4", "--timeout", "30", "--access-logfile", "-", "--error-logfile", "-"]
+    restart: unless-stopped
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN:?BOT_TOKEN is required}
+      TELEGRAM_GATEWAY_TOKEN: ${TELEGRAM_GATEWAY_TOKEN:?TELEGRAM_GATEWAY_TOKEN is required}
+      DATA_ACCESS_MODE: none
+    ports:
+      # Loopback-only: the existing host Caddy terminates public TLS.
+      - "127.0.0.1:${TELEGRAM_GATEWAY_LOCAL_PORT:-8010}:8010"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health/live', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app
+
+networks:
+  app:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${FOREIGN_APP_NETWORK_SUBNET:-172.30.0.0/24}
+          gateway: ${FOREIGN_TUNNEL_GATEWAY_IP:-172.30.0.1}

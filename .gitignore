@@ -1,0 +1,76 @@
+# Local configuration, credentials and private notes
+.env*
+!.env.example
+!.env.rf.example
+!.env.foreign.example
+*.local.*
+*.local
+secrets/
+credentials/
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+id_rsa*
+id_ed25519*
+*_deploy_key*
+*.restic-password
+restic-password
+rclone.conf
+known_hosts
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local databases and runtime files
+app.db
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.dump
+*.sql
+*.log
+*.pid
+*.sock
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.bak
+*.tmp
+backups/
+staging/
+nul
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Docker local overrides
+docker-compose.override.yml
+
+# Local browser diagnostics
+.cdp-*
+.selfview-diagnostic.html
+node_modules/
+coverage/
+htmlcov/
+.coverage*

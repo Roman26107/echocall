@@ -1,0 +1,41 @@
+limit_req_zone $binary_remote_addr zone=telegram_gateway:10m rate=20r/s;
+
+upstream telegram_gateway {
+    server telegram-gateway:8010;
+    keepalive 8;
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${GATEWAY_DOMAIN};
+
+    ssl_certificate /etc/nginx/certs/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    allow ${RF_SERVER_IP};
+    deny all;
+
+    location = /health/live {
+        proxy_pass http://telegram_gateway;
+        access_log off;
+    }
+
+    location /internal/v1/telegram/ {
+        limit_req zone=telegram_gateway burst=40 nodelay;
+        client_max_body_size 64k;
+        proxy_pass http://telegram_gateway;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Request-ID $http_x_request_id;
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 15s;
+        proxy_read_timeout 15s;
+    }
+
+    location / { return 404; }
+}

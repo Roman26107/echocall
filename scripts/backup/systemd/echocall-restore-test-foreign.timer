@@ -1,0 +1,11 @@
+[Unit]
+Description=Monthly restore verification of foreign EchoCall backup
+
+[Timer]
+OnCalendar=monthly
+RandomizedDelaySec=2h
+Persistent=true
+Unit=echocall-restore-test@foreign.service
+
+[Install]
+WantedBy=timers.target

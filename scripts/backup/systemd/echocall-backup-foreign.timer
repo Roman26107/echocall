@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily EchoCall PostgreSQL backup to foreign VPS
+
+[Timer]
+OnCalendar=*-*-* 03:15:00
+RandomizedDelaySec=20m
+Persistent=true
+Unit=echocall-backup@foreign.service
+
+[Install]
+WantedBy=timers.target

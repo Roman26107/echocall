@@ -2,7 +2,9 @@ import json
 import ssl
 import uuid
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request
+
+from shared.http import open_service_request, read_json_object
 
 from settings import (
     TELEGRAM_GATEWAY_TIMEOUT,
@@ -74,18 +76,26 @@ class TelegramGatewayClient:
             method='POST',
         )
         try:
-            with urlopen(request, timeout=TELEGRAM_GATEWAY_TIMEOUT) as response:
-                body = json.loads(response.read().decode('utf-8'))
+            with open_service_request(request, timeout=TELEGRAM_GATEWAY_TIMEOUT) as response:
+                body = read_json_object(response)
         except HTTPError as error:
             try:
-                body = json.loads(error.read().decode('utf-8'))
+                body = read_json_object(error)
             except (ValueError, UnicodeDecodeError):
-                raise TelegramGatewayError(f'Telegram Gateway HTTP {error.code}') from error
+                raise TelegramGatewayError(f'Telegram Gateway HTTP {error.code}') from None
+            finally:
+                error.close()
             api_error = body.get('error') or {}
-            error_code = str(api_error.get('code') or '')
+            error_code = api_error.get('code') if isinstance(api_error, dict) else None
+            if not isinstance(error_code, str):
+                raise TelegramGatewayError(f'Telegram Gateway HTTP {error.code}') from None
             error_type = ERROR_TYPES.get(error_code, TelegramGatewayError)
-            raise error_type(api_error.get('message', 'Telegram Gateway error')) from error
+            raise error_type(error_type.code) from None
+        except (ValueError, UnicodeDecodeError):
+            raise TelegramGatewayError('Invalid Telegram Gateway response') from None
         except (URLError, TimeoutError, OSError, ssl.SSLError) as error:
-            raise TelegramGatewayError(f'Telegram Gateway unavailable: {error}') from error
+            raise TelegramGatewayError('Telegram Gateway unavailable') from None
 
-        return body.get('result')
+        if body.get('ok') is not True or 'result' not in body:
+            raise TelegramGatewayError('Invalid Telegram Gateway response')
+        return body['result']

@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from settings import DATA_ACCESS_MODE, DATABASE_URL
 from shared.db.models import Base
@@ -23,6 +23,12 @@ SessionFactory = sessionmaker(
     autocommit=False,
     expire_on_commit=False,
 )
+
+
+if engine.dialect.name == 'sqlite':
+    @event.listens_for(engine, 'connect')
+    def enable_sqlite_foreign_keys(connection, _record):
+        connection.execute('PRAGMA foreign_keys=ON')
 
 
 def SessionLocal():

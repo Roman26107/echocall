@@ -30,6 +30,7 @@ def get_active_call_context(session, user_id: int) -> dict | None:
     participant = session.query(CallParticipant).join(Call).filter(
         CallParticipant.user_id == user_id,
         Call.status.in_(BLOCK_STATUSES),
+        CallParticipant.status.notin_(('left', 'declined')),
     ).first()
 
     if participant is None:
@@ -124,6 +125,9 @@ def accept_call(session, access_token: str) -> CallParticipant:
     if participant is None:
         raise InvalidCallTokenError()
 
+    if participant.status in {'left', 'declined'}:
+        raise InvalidCallTokenError()
+
     context = get_active_call_context(session, participant.user_id)
 
     if context and context['call']['id'] != participant.call_id:
@@ -132,7 +136,7 @@ def accept_call(session, access_token: str) -> CallParticipant:
             users=context['users'],
         )
 
-    call = session.get(Call, participant.call_id)
+    call = session.get(Call, participant.call_id, with_for_update=True, populate_existing=True)
 
     if call is None:
         raise CallNotFoundError()
@@ -140,8 +144,13 @@ def accept_call(session, access_token: str) -> CallParticipant:
     if call.status in {'ended', 'declined'}:
         raise CallNotFoundError()
 
-    participant.status = 'joined'
-    participant.joined_at = datetime.now(UTC)
+    session.refresh(participant)
+    if participant.status in {'left', 'declined'}:
+        raise InvalidCallTokenError()
+
+    if participant.status != 'joined':
+        participant.status = 'joined'
+        participant.joined_at = datetime.now(UTC)
 
     if call.status == 'ringing':
         call.status = 'active'
@@ -183,9 +192,17 @@ def start_call(
         creator_id: int,
         callee_id: int,
 ) -> dict:
-    callee = session.get(User, callee_id)
+    if creator_id == callee_id:
+        raise CallNotFoundError()
+    # Serialize invitations with a stable PostgreSQL lock order, including
+    # simultaneous attempts by two users to call one another.
+    users = session.query(User).filter(User.id.in_((creator_id, callee_id))).order_by(
+        User.id,
+    ).populate_existing().with_for_update().all()
+    by_id = {user.id: user for user in users}
+    callee = by_id.get(callee_id)
 
-    if callee is None:
+    if creator_id not in by_id or callee is None:
         raise CallNotFoundError()
 
     if callee.incoming_call_policy == 'nobody':
@@ -199,6 +216,11 @@ def start_call(
         and get_contact(session, callee_id, creator_id) is None
     ):
         raise IncomingCallForbiddenError()
+
+    for user_id in (creator_id, callee_id):
+        context = get_active_call_context(session, user_id)
+        if context:
+            raise ActiveCallExistsError(call=context['call'], users=context['users'])
 
     call = create_call(session, creator_id)
 
@@ -295,11 +317,12 @@ def decline_call_token(
     if participant is None:
         raise InvalidCallTokenError()
 
-    call = session.get(Call, participant.call_id)
+    call = session.get(Call, participant.call_id, with_for_update=True, populate_existing=True)
 
     if call is None:
         raise CallNotFoundError()
 
+    session.refresh(participant)
     return _decline_participant(session, call, participant)
 
 
@@ -309,7 +332,7 @@ def decline_call_user(
         call_id: int,
         user_id: int,
 ) -> CallParticipant:
-    call = session.get(Call, call_id)
+    call = session.get(Call, call_id, with_for_update=True, populate_existing=True)
 
     if call is None:
         raise CallNotFoundError()
@@ -317,7 +340,7 @@ def decline_call_user(
     participant = session.query(CallParticipant).filter(
         CallParticipant.call_id == call.id,
         CallParticipant.user_id == user_id,
-    ).first()
+    ).populate_existing().first()
 
     if participant is None:
         raise ParticipantNotFoundError()
@@ -331,7 +354,7 @@ def leave_or_end_call_by_user(
         call_id: int,
         user_id: int,
 ) -> Call:
-    call = session.get(Call, call_id)
+    call = session.get(Call, call_id, with_for_update=True, populate_existing=True)
 
     if call is None:
         raise CallNotFoundError()
@@ -339,12 +362,12 @@ def leave_or_end_call_by_user(
     participant = session.query(CallParticipant).filter(
         CallParticipant.call_id == call.id,
         CallParticipant.user_id == user_id,
-    ).first()
+    ).populate_existing().first()
 
     if participant is None:
         raise ParticipantNotFoundError()
 
-    if call.status == 'ended':
+    if call.status in {'ended', 'declined'} or participant.status in {'left', 'declined'}:
         return call
 
     now = datetime.now(UTC)
@@ -362,7 +385,7 @@ def leave_or_end_call_by_user(
     ).all()
 
     has_active_admin = any(
-        item.role == 'admin' and item.status != 'left'
+        item.role == 'admin' and item.status not in {'left', 'declined'}
         for item in participants
     )
 

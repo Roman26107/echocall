@@ -352,6 +352,19 @@ p {
     -webkit-line-clamp: 2;
 }
 
+.call-control-icon svg {
+    width: 28px;
+    height: 28px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
 @media (max-width: 420px) {
     .call-controls {
         bottom: max(10px, env(safe-area-inset-bottom));

@@ -1,4 +1,5 @@
 from datetime import date, datetime, timezone
+import secrets
 
 from sqlalchemy import BigInteger, Boolean, Date, DateTime, Float, ForeignKey, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -106,6 +107,13 @@ class Call(Base):
     __tablename__ = 'calls'
 
     id: Mapped[int] = mapped_column(primary_key=True)
+
+    room_name: Mapped[str] = mapped_column(
+        String(64),
+        default=lambda: secrets.token_hex(24),
+        unique=True,
+        nullable=False,
+    )
 
     creator_id: Mapped[int] = mapped_column(
         ForeignKey('users.id'),

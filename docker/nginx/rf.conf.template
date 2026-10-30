@@ -1,3 +1,6 @@
+log_format echocall_public '$request_method $status $body_bytes_sent $request_time';
+access_log /var/log/nginx/access.log echocall_public;
+
 limit_req_zone $binary_remote_addr zone=internal_api:10m rate=30r/s;
 
 upstream echocall_web {

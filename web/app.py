@@ -1,11 +1,12 @@
 import asyncio
 import html
+import secrets
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
 from sqlalchemy import text
 from shared.db.session import SessionLocal
-from flask import Flask, render_template, abort, jsonify, make_response, request
+from flask import Flask, render_template, abort, g, jsonify, make_response, request
 from shared.db.models import Call, CallParticipant, User
 from shared.exceptions import CallError, InvalidCallTokenError
 from shared.services.calls import (
@@ -31,8 +32,43 @@ from shared.telegram_gateway.client import (
 )
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 64 * 1024
 
 ALLOWED_THEMES = {'light', 'dark'}
+
+
+@app.before_request
+def prepare_response_security():
+    g.script_nonce = secrets.token_urlsafe(24)
+
+
+@app.after_request
+def secure_response(response):
+    response.headers['Referrer-Policy'] = 'no-referrer'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-Robots-Tag'] = 'noindex, nofollow'
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; "
+        f"script-src 'self' 'nonce-{g.script_nonce}' https://{JITSI_DOMAIN}; "
+        f"frame-src https://{JITSI_DOMAIN}; "
+        "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+        "connect-src 'self'; object-src 'none'; base-uri 'none'; "
+        "frame-ancestors 'none'; form-action 'self'"
+    )
+    if request.endpoint != 'static':
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
+        response.headers['Pragma'] = 'no-cache'
+    return response
+
+
+async def safely_edit_telegram_message(**kwargs) -> None:
+    try:
+        await edit_telegram_message(**kwargs)
+    except Exception:
+        # Links, bot tokens, chat IDs and provider error bodies must not enter logs.
+        # Notification failure cannot undo a committed call transition.
+        app.logger.warning('Telegram call notification could not be delivered')
 
 
 async def edit_telegram_message(**kwargs) -> None:
@@ -210,7 +246,7 @@ async def update_call_finished_screens(screens_data: list[dict]) -> None:
     for item in screens_data:
         if not item['telegram_chat_id'] or not item['telegram_message_id']:
             continue
-        await edit_telegram_message(
+        await safely_edit_telegram_message(
             chat_id=item['telegram_chat_id'],
             message_id=item['telegram_message_id'],
             text=item['text'],
@@ -262,12 +298,12 @@ async def update_active_call_screens(participants_data: list[dict]) -> None:
     for item in participants_data:
         if not item['telegram_chat_id'] or not item['telegram_message_id']:
             continue
-        await edit_telegram_message(
+        await safely_edit_telegram_message(
             chat_id=item['telegram_chat_id'],
             message_id=item['telegram_message_id'],
             text=(
                 '🟢 Звонок активен\n\n'
-                f'Собеседник: <b>{item["other_display_name"]}</b>'
+                f'Собеседник: <b>{html.escape(item["other_display_name"])}</b>'
             ),
             reply_markup=active_call_kb(
                 join_url=item['join_url'],
@@ -398,8 +434,10 @@ def call_status(access_token: str):
 @app.post('/<access_token>/transport')
 def call_transport(access_token: str):
     payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({'ok': False, 'error': 'invalid_transport'}), 400
     transport_mode = payload.get('mode')
-    if transport_mode not in {'p2p', 'jvb'}:
+    if not isinstance(transport_mode, str) or transport_mode not in {'p2p', 'jvb'}:
         return jsonify({'ok': False, 'error': 'invalid_transport'}), 400
 
     session = SessionLocal()
@@ -451,7 +489,7 @@ def call_page(access_token: str):
 
         response = make_response(render_template(
                 'call.html',
-                call_id=call.id,
+                room_name=call.room_name,
                 display_name=user.display_name or 'User',
                 jitsi_domain=JITSI_DOMAIN,
                 access_token=access_token,

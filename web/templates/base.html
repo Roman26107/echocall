@@ -2,10 +2,11 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="referrer" content="no-referrer">
     <title>{% block title %}Звонок{% endblock %}</title>
 
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='20260813-2') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='20261030-1') }}">
     {% block head %}{% endblock %}
 </head>
 <body class="theme-{{ theme if theme in ['light', 'dark'] else 'light' }} {% block body_class %}{% endblock %}">

@@ -46,7 +46,7 @@ services:
   web:
     image: ${APP_IMAGE:-echocall-rf-app:latest}
     build: .
-    command: ["gunicorn", "web.app:app", "--bind", "0.0.0.0:8000", "--workers", "2", "--threads", "4", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-"]
+    command: ["gunicorn", "web.app:app", "--bind", "0.0.0.0:8000", "--workers", "2", "--threads", "4", "--timeout", "120", "--access-logfile", "-", "--access-logformat", "%(m)s %(s)s %(L)s", "--error-logfile", "-"]
     restart: unless-stopped
     extra_hosts:
       # Restricted reverse-SSH listener on this network's fixed host gateway.
@@ -83,7 +83,7 @@ services:
   internal-api:
     image: ${APP_IMAGE:-echocall-rf-app:latest}
     build: .
-    command: ["gunicorn", "shared.internal_api.server:app", "--bind", "0.0.0.0:8001", "--workers", "2", "--threads", "4", "--timeout", "30", "--access-logfile", "-", "--error-logfile", "-"]
+    command: ["gunicorn", "shared.internal_api.server:app", "--bind", "0.0.0.0:8001", "--workers", "2", "--threads", "4", "--timeout", "30", "--access-logfile", "-", "--access-logformat", "%(m)s %(s)s %(L)s", "--error-logfile", "-"]
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}

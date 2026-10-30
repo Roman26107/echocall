@@ -45,6 +45,8 @@ services:
       - "120"
       - --access-logfile
       - "-"
+      - --access-logformat
+      - "%(m)s %(s)s %(L)s"
       - --error-logfile
       - "-"
     restart: unless-stopped

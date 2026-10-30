@@ -16,6 +16,44 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class MigrationTests(unittest.TestCase):
+    def test_existing_calls_receive_unique_rooms_and_downgrade_is_reversible(self):
+        with tempfile.TemporaryDirectory(prefix='echocall-upgrade-') as folder:
+            url = 'sqlite:///' + (Path(folder) / 'test.db').as_posix()
+            env = {**os.environ, 'DATABASE_URL': url, 'DATA_ACCESS_MODE': 'direct'}
+
+            def migrate(*args):
+                result = subprocess.run([sys.executable, '-m', 'alembic', *args],
+                                        cwd=ROOT, env=env, capture_output=True,
+                                        text=True, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+            migrate('upgrade', 'b8d5f0a3c214')
+            engine = create_engine(url)
+            try:
+                with engine.begin() as connection:
+                    connection.execute(text(
+                        "INSERT INTO users (id, telegram_id, display_name, timezone, incoming_call_policy, "
+                        "call_notification_mode, call_notification_interval, theme, created_at) "
+                        "VALUES (1, 1, 'Example', 'UTC', 'all', 'once', 60, 'light', CURRENT_TIMESTAMP)"
+                    ))
+                    for call_id in (1, 2):
+                        connection.execute(text(
+                            "INSERT INTO calls (id, creator_id, call_type, max_participants, status, created_at) "
+                            "VALUES (:id, 1, 'direct', 2, 'ringing', CURRENT_TIMESTAMP)"
+                        ), {'id': call_id})
+                migrate('upgrade', 'head')
+                with engine.connect() as connection:
+                    rooms = connection.execute(text('SELECT room_name FROM calls')).scalars().all()
+                self.assertEqual(len(set(rooms)), 2)
+                for room in rooms:
+                    self.assertRegex(room, r'^[a-f0-9]{48}$')
+                migrate('check')
+                migrate('downgrade', 'b8d5f0a3c214')
+                self.assertNotIn('room_name', {column['name'] for column in inspect(engine).get_columns('calls')})
+                migrate('upgrade', 'head')
+            finally:
+                engine.dispose()
+
     def test_empty_database_upgrades_and_accepts_application_models(self):
         with tempfile.TemporaryDirectory(prefix='echocall-migrations-') as folder:
             url = 'sqlite:///' + (Path(folder) / 'test.db').as_posix()

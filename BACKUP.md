@@ -60,6 +60,14 @@ or both. The RF Internal API talks to a root-owned Unix socket exposed by
 trigger accepts only the fixed systemd unit allowlist. The request returns
 immediately and the admin screen polls status with «Обновить статус».
 
+The application image uses UID/GID `10001:10001`, not root. The installer creates
+the dedicated `echocall-backup` host group with GID 10001. The trigger runs as root
+with that group, creates its runtime directory as `0750`, and exposes a `0660`
+socket. The mount remains read-only and accepts only the fixed unit allowlist.
+If GID 10001 is already assigned to another group, resolve that conflict before
+installation rather than making the socket world-writable. Re-run the reviewed
+installer when upgrading an older root-only socket installation.
+
 Inspect schedules and logs:
 
 ```bash

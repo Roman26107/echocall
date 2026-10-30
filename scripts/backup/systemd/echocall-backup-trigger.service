@@ -6,10 +6,10 @@ After=docker.service
 [Service]
 Type=simple
 User=root
-Group=root
+Group=echocall-backup
 UMask=0077
 RuntimeDirectory=echocall-backup-trigger
-RuntimeDirectoryMode=0700
+RuntimeDirectoryMode=0750
 ExecStart=/usr/local/sbin/echocall-backup-trigger
 Restart=on-failure
 RestartSec=5s

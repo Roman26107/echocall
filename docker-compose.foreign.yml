@@ -31,7 +31,7 @@ services:
   telegram-gateway:
     image: ${APP_IMAGE:-echocall-foreign-app:latest}
     build: .
-    command: ["gunicorn", "gateway.app:app", "--bind", "0.0.0.0:8010", "--workers", "2", "--threads", "4", "--timeout", "30", "--access-logfile", "-", "--error-logfile", "-"]
+    command: ["gunicorn", "gateway.app:app", "--bind", "0.0.0.0:8010", "--workers", "2", "--threads", "4", "--timeout", "30", "--access-logfile", "-", "--access-logformat", "%(m)s %(s)s %(L)s", "--error-logfile", "-"]
     restart: unless-stopped
     environment:
       BOT_TOKEN: ${BOT_TOKEN:?BOT_TOKEN is required}

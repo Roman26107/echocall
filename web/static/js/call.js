@@ -2,7 +2,7 @@
     const config = window.CALL_CONFIG || {};
 
     const domain = config.jitsiDomain;
-    const roomName = config.callId;
+    const roomName = config.roomName;
     const displayName = config.displayName || 'User';
     const hangupUrl = config.hangupUrl;
     const statusUrl = config.statusUrl;
@@ -46,9 +46,10 @@
     let audioMuted = false;
     let videoMuted = true;
     let screenWakeLock = null;
+    let statusRequestPending = false;
 
     if (switchCameraButton) {
-        switchCameraButton.hidden = !isMobileDevice;
+        switchCameraButton.hidden = true;
         switchCameraButton.disabled = true;
     }
 
@@ -151,6 +152,10 @@
 
         try {
             const lock = await navigatorObject.wakeLock.request('screen');
+            if (!connected || pageExitStarted || supersededByAnotherTab || closedByServer || localCloseStarted) {
+                await lock.release();
+                return;
+            }
             screenWakeLock = lock;
             lock.addEventListener?.('release', () => {
                 if (screenWakeLock === lock) {
@@ -181,7 +186,7 @@
             Math.max(minimumLoadingTime - (Date.now() - loadingStartedAt), joinedUiStabilizationTime),
         );
         window.setTimeout(() => {
-            if (connected && !closedByServer && !supersededByAnotherTab) {
+            if (connected && !closedByServer && !supersededByAnotherTab && !localCloseStarted && !pageExitStarted) {
                 showScreen('jitsi');
             }
         }, remaining);
@@ -259,6 +264,39 @@
             console.error(`Failed to execute ${command}`, error);
         } finally {
             button.disabled = false;
+            updateSwitchCameraControl();
+        }
+    }
+
+    function updateSwitchCameraControl() {
+        if (switchCameraButton) {
+            const available = isMobileDevice && connected && !videoMuted
+                && !pageExitStarted && !supersededByAnotherTab && !closedByServer && !localCloseStarted;
+            switchCameraButton.hidden = !available;
+            switchCameraButton.disabled = !available;
+        }
+    }
+
+    function stopCallTimers() {
+        if (connectionTimer) {
+            window.clearTimeout(connectionTimer);
+            connectionTimer = null;
+        }
+        if (statusTimer) {
+            window.clearInterval(statusTimer);
+            statusTimer = null;
+        }
+    }
+
+    function disposeCurrentApi() {
+        const currentApi = api;
+        api = null;
+        if (currentApi) {
+            try {
+                currentApi.dispose();
+            } catch (error) {
+                console.error('Failed to dispose Jitsi API', error);
+            }
         }
     }
 
@@ -343,6 +381,9 @@
             return;
         }
         closedByServer = true;
+        connected = false;
+        stopCallTimers();
+        updateSwitchCameraControl();
         releaseScreenWakeLock();
 
         if (tabCoordinator) {
@@ -350,14 +391,7 @@
             tabCoordinator = null;
         }
 
-        try {
-            if (api) {
-                api.dispose();
-                api = null;
-            }
-        } catch (error) {
-            console.error('Failed to leave Jitsi call', error);
-        }
+        disposeCurrentApi();
         showScreen('finished');
     }
 
@@ -367,6 +401,9 @@
         }
 
         closedByServer = true;
+        connected = false;
+        stopCallTimers();
+        updateSwitchCameraControl();
         releaseScreenWakeLock();
 
         if (tabCoordinator) {
@@ -374,14 +411,7 @@
             tabCoordinator = null;
         }
 
-        try {
-            if (api) {
-                api.dispose();
-                api = null;
-            }
-        } catch (error) {
-            console.error('Failed to close Jitsi call', error);
-        }
+        disposeCurrentApi();
 
         showScreen('finished');
     }
@@ -400,7 +430,9 @@
         }
 
         connected = false;
-        api = null;
+        disposeCurrentApi();
+        releaseScreenWakeLock();
+        updateSwitchCameraControl();
 
         if (connectionTimer) {
             window.clearTimeout(connectionTimer);
@@ -414,25 +446,33 @@
     }
 
     async function checkCallStatus() {
-        if (supersededByAnotherTab || closedByServer) {
+        if (supersededByAnotherTab || closedByServer || pageExitStarted || statusRequestPending) {
             return;
         }
 
+        statusRequestPending = true;
         try {
             const response = await fetch(statusUrl, { cache: 'no-store' });
 
+            if (supersededByAnotherTab || closedByServer || pageExitStarted) {
+                return;
+            }
             if (!response.ok) {
-                closeCallFromServer();
+                if ([403, 404, 410].includes(response.status)) {
+                    closeCallFromServer();
+                }
                 return;
             }
 
             const data = await response.json();
 
-            if (data.should_close) {
+            if (data && data.should_close === true && !supersededByAnotherTab && !pageExitStarted) {
                 closeCallFromServer();
             }
         } catch (error) {
             console.error('Failed to check call status', error);
+        } finally {
+            statusRequestPending = false;
         }
     }
 
@@ -443,12 +483,15 @@
         }
         reportedTransport = mode;
         try {
-            await fetch(transportUrl, {
+            const response = await fetch(transportUrl, {
                 method: 'POST',
                 keepalive: true,
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ mode: mode }),
             });
+            if (!response.ok) {
+                reportedTransport = null;
+            }
         } catch (error) {
             reportedTransport = null;
             console.error('Failed to report call transport', error);
@@ -561,7 +604,7 @@
     }
 
     function startJitsi() {
-        if (supersededByAnotherTab || api) {
+        if (supersededByAnotherTab || api || pageExitStarted || localCloseStarted || closedByServer) {
             return;
         }
 
@@ -582,7 +625,8 @@
             }
             connected = true;
             mediaRecoveryStarted = false;
-            sendLocalVideoStateToJitsi(true);
+            updateSwitchCameraControl();
+            sendLocalVideoStateToJitsi(videoMuted);
             revealJoinedCall();
             void requestScreenWakeLock();
         });
@@ -598,7 +642,7 @@
                 return;
             }
             audioMuted = Boolean(event && event.muted);
-            setControlState(audioButton, event.muted, 'Включить микрофон', 'Выключить микрофон');
+            setControlState(audioButton, audioMuted, 'Включить микрофон', 'Выключить микрофон');
         });
 
         currentApi.addEventListener('videoMuteStatusChanged', (event) => {
@@ -606,11 +650,9 @@
                 return;
             }
             videoMuted = Boolean(event && event.muted);
-            setControlState(videoButton, event.muted, 'Включить камеру', 'Выключить камеру');
-            if (switchCameraButton) {
-                switchCameraButton.disabled = videoMuted;
-            }
-            sendLocalVideoStateToJitsi(event.muted);
+            setControlState(videoButton, videoMuted, 'Включить камеру', 'Выключить камеру');
+            updateSwitchCameraControl();
+            sendLocalVideoStateToJitsi(videoMuted);
         });
 
         currentApi.addEventListener('readyToClose', () => handleUnexpectedConferenceExit(currentApi));

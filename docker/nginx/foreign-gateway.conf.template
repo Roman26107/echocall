@@ -1,3 +1,6 @@
+log_format echocall_gateway '$request_method $status $body_bytes_sent $request_time';
+access_log /var/log/nginx/access.log echocall_gateway;
+
 limit_req_zone $binary_remote_addr zone=telegram_gateway:10m rate=20r/s;
 
 upstream telegram_gateway {

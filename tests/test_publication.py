@@ -35,6 +35,23 @@ class PublicationTests(unittest.TestCase):
             with self.subTest(path=name):
                 self.assertFalse((ROOT / name).exists())
 
+    def test_access_logs_do_not_capture_capability_urls(self):
+        for name in ('default.conf', 'rf.conf.template', 'foreign-gateway.conf.template'):
+            text = (ROOT / 'docker/nginx' / name).read_text(encoding='utf-8')
+            log_format = next(line for line in text.splitlines() if line.startswith('log_format '))
+            for sensitive in ('$request_uri', '$request ', '$http_referer', '$args'):
+                self.assertNotIn(sensitive, log_format)
+        for name in ('docker-compose.yml', 'docker-compose.rf.yml', 'docker-compose.foreign.yml'):
+            text = (ROOT / name).read_text(encoding='utf-8')
+            self.assertIn('--access-logformat', text)
+            self.assertIn('%(m)s %(s)s %(L)s', text)
+
+    def test_application_container_runs_as_unprivileged_user(self):
+        dockerfile = (ROOT / 'Dockerfile').read_text(encoding='utf-8')
+        self.assertIn('USER 10001:10001', dockerfile)
+        self.assertIn('Dependency vulnerability audit',
+                      (ROOT / '.github/workflows/ci.yml').read_text(encoding='utf-8'))
+
 
 if __name__ == '__main__':
     unittest.main()

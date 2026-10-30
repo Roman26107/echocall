@@ -9,6 +9,7 @@ __pycache__
 .Python
 .pytest_cache
 .mypy_cache
+**/.mypy_cache
 .ruff_cache
 .idea
 .vscode

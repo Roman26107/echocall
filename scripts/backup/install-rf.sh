@@ -7,6 +7,15 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y restic rclone
 
+# Match the unprivileged application container's fixed numeric group.
+if ! getent group echocall-backup >/dev/null; then
+  groupadd --system --gid 10001 echocall-backup
+fi
+[ "$(getent group echocall-backup | cut -d: -f3)" = 10001 ] || {
+  echo "echocall-backup must use GID 10001 to match the application container." >&2
+  exit 1
+}
+
 install -d -m 700 /etc/echocall-backup /var/lib/echocall-backup/staging
 install -d -m 700 /var/cache/echocall-backup/restic
 install -m 755 "$SCRIPT_DIR/echocall-backup-lib.sh" /usr/local/lib/echocall-backup-lib.sh

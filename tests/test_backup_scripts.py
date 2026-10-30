@@ -83,7 +83,12 @@ class BackupScriptTests(unittest.TestCase):
         self.assertIn("'google': ('echocall-backup@google.service',)", script)
         self.assertIn("['systemctl', 'start', unit]", script)
         self.assertNotIn('shell=True', script)
-        self.assertIn("os.chmod(SOCKET_PATH, 0o600)", script)
+        self.assertIn("os.chmod(SOCKET_PATH, 0o660)", script)
+        unit = (BACKUP / 'systemd/echocall-backup-trigger.service').read_text(encoding='utf-8')
+        self.assertIn('Group=echocall-backup', unit)
+        self.assertIn('RuntimeDirectoryMode=0750', unit)
+        self.assertIn('groupadd --system --gid 10001 echocall-backup',
+                      (BACKUP / 'install-rf.sh').read_text(encoding='utf-8'))
 
 
 if __name__ == '__main__':

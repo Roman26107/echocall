@@ -40,7 +40,7 @@ class FakeElement {
 }
 
 
-function createRuntime({ localStorageThrows = false, userAgent = 'Desktop Browser' } = {}) {
+function createRuntime({ localStorageThrows = false, userAgent = 'Desktop Browser', fetchHandler } = {}) {
     const elements = new Map();
     for (const id of [
         'toggle-audio',
@@ -77,6 +77,7 @@ function createRuntime({ localStorageThrows = false, userAgent = 'Desktop Browse
         setAttribute() {},
     };
     const timeoutCallbacks = [];
+    const intervalCallbacks = new Map();
     let reloadCount = 0;
 
     class FakeJitsiApi {
@@ -109,7 +110,7 @@ function createRuntime({ localStorageThrows = false, userAgent = 'Desktop Browse
     const windowObject = {
         CALL_CONFIG: {
             jitsiDomain: 'meet.example.test',
-            callId: 101,
+            roomName: 'test-private-room-name',
             displayName: 'Alice',
             hangupUrl: '/secret-token/hangup',
             statusUrl: '/secret-token/status',
@@ -136,9 +137,13 @@ function createRuntime({ localStorageThrows = false, userAgent = 'Desktop Browse
         addEventListener(name, handler) {
             windowListeners.set(name, handler);
         },
-        clearInterval() {},
+        clearInterval(id) { intervalCallbacks.delete(id); },
         clearTimeout() {},
-        setInterval: () => 1,
+        setInterval(callback) {
+            const id = intervalCallbacks.size + 1;
+            intervalCallbacks.set(id, callback);
+            return id;
+        },
         setTimeout(callback) {
             timeoutCallbacks.push(callback);
             return timeoutCallbacks.length;
@@ -182,6 +187,7 @@ function createRuntime({ localStorageThrows = false, userAgent = 'Desktop Browse
         document: documentObject,
         fetch: async (...args) => {
             fetchCalls.push(args);
+            if (fetchHandler) return fetchHandler(...args);
             return { ok: true, json: async () => ({ should_close: false }) };
         },
         window: windowObject,
@@ -196,6 +202,7 @@ function createRuntime({ localStorageThrows = false, userAgent = 'Desktop Browse
         elements,
         fetchCalls,
         iframeMessages,
+        intervalCallbacks,
         documentListeners,
         windowListeners,
         runTimeouts() {
@@ -441,4 +448,85 @@ test('returning from iOS back-forward cache reloads disposed call page', () => {
 test('switch-camera control stays hidden on desktop browsers', () => {
     const runtime = createRuntime();
     assert.equal(runtime.elements.get('switch-camera').hidden, true);
+});
+
+
+test('switch camera is only visible with active mobile video', () => {
+    const runtime = createRuntime({ userAgent: 'Android' });
+    const button = runtime.elements.get('switch-camera');
+    assert.equal(button.hidden, true);
+    runtime.getCoordinatorOptions().onStart();
+    const api = runtime.apiInstances[0];
+    api.emit('videoConferenceJoined');
+    assert.equal(button.hidden, true);
+    api.emit('videoMuteStatusChanged', { muted: false });
+    assert.equal(button.hidden, false);
+    api.emit('videoMuteStatusChanged', { muted: true });
+    assert.equal(button.hidden, true);
+    assert.equal(button.disabled, true);
+});
+
+
+test('temporary status failures do not disconnect an active call', async () => {
+    const runtime = createRuntime({ fetchHandler: async () => ({ ok: false, status: 503 }) });
+    runtime.getCoordinatorOptions().onStart();
+    const api = runtime.apiInstances[0];
+    api.emit('videoConferenceJoined');
+    await [...runtime.intervalCallbacks.values()][0]();
+    assert.equal(api.disposed, false);
+    assert.equal(runtime.elements.get('finished-screen').active, false);
+});
+
+
+test('invalidated capability stops status polling and disposes media', async () => {
+    const runtime = createRuntime({ fetchHandler: async () => ({ ok: false, status: 404 }) });
+    runtime.getCoordinatorOptions().onStart();
+    runtime.apiInstances[0].emit('videoConferenceJoined');
+    await [...runtime.intervalCallbacks.values()][0]();
+    assert.equal(runtime.apiInstances[0].disposed, true);
+    assert.equal(runtime.elements.get('finished-screen').active, true);
+    assert.equal(runtime.intervalCallbacks.size, 0);
+});
+
+
+test('status polling does not overlap requests', async () => {
+    let resolve;
+    const runtime = createRuntime({ fetchHandler: () => new Promise((done) => { resolve = done; }) });
+    runtime.getCoordinatorOptions().onStart();
+    const poll = [...runtime.intervalCallbacks.values()][0];
+    const pending = poll();
+    await poll();
+    assert.equal(runtime.fetchCalls.length, 1);
+    resolve({ ok: true, json: async () => ({ should_close: false }) });
+    await pending;
+});
+
+
+test('late status result cannot replace a superseded tab screen', async () => {
+    let resolve;
+    const runtime = createRuntime({ fetchHandler: () => new Promise((done) => { resolve = done; }) });
+    runtime.getCoordinatorOptions().onStart();
+    const pending = [...runtime.intervalCallbacks.values()][0]();
+    runtime.getCoordinatorOptions().onSuperseded();
+    resolve({ ok: true, json: async () => ({ should_close: true }) });
+    await pending;
+    assert.equal(runtime.elements.get('other-tab-screen').active, true);
+    assert.equal(runtime.elements.get('finished-screen').active, false);
+});
+
+
+test('unexpected conference exit explicitly disposes the old API', () => {
+    const runtime = createRuntime();
+    runtime.getCoordinatorOptions().onStart();
+    const api = runtime.apiInstances[0];
+    api.emit('videoConferenceLeft');
+    assert.equal(api.disposed, true);
+    assert.equal(runtime.elements.get('connection-error-screen').active, true);
+});
+
+
+test('Jitsi receives an opaque room name, never a sequential call ID', () => {
+    const runtime = createRuntime();
+    runtime.getCoordinatorOptions().onStart();
+    assert.equal(runtime.apiInstances[0].options.roomName, 'test-private-room-name');
 });

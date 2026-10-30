@@ -43,7 +43,7 @@ class BackupController:
             return json.loads(json.dumps(self._status))
 
     def start(self, target: str) -> dict:
-        if target not in TARGET_UNITS:
+        if not isinstance(target, str) or target not in TARGET_UNITS:
             return {'ok': False, 'error': 'invalid_target'}
         with self._lock:
             if self._status['state'] == 'running':
@@ -93,6 +93,8 @@ CONTROLLER = BackupController()
 
 
 class TriggerHandler(socketserver.StreamRequestHandler):
+    timeout = 3
+
     def handle(self) -> None:
         raw = self.rfile.readline(MAX_REQUEST_BYTES + 1)
         if len(raw) > MAX_REQUEST_BYTES:
@@ -121,10 +123,10 @@ class TriggerServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
 
 
 def main() -> None:
-    SOCKET_PATH.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    SOCKET_PATH.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
     SOCKET_PATH.unlink(missing_ok=True)
     server = TriggerServer(str(SOCKET_PATH), TriggerHandler)
-    os.chmod(SOCKET_PATH, 0o600)
+    os.chmod(SOCKET_PATH, 0o660)
     try:
         server.serve_forever()
     finally:

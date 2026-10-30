@@ -1,6 +1,6 @@
 aiogram==3.31.0
 python-dotenv==1.2.4
-SQLAlchemy==2.0.55
+SQLAlchemy==2.1.6
 psycopg2-binary==2.9.13
 tzdata==2026.6
 Flask==3.1.3
